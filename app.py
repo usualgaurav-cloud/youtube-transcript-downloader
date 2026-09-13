@@ -97,4 +97,3 @@ def download():
         return send_file(zip_path, as_attachment=True)
 
 
-app.run(debug=True)
