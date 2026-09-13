@@ -3,29 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Transcript Downloader  - Testing</title>
+  <title>YouTube Transcript Downloader</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
 
   <header>
-    <h1>YouTube Transcript Downloader</h1>
-    <p>Download transcripts from multiple YouTube videos at once.</p>
+    <div class="logo">YT TRANSCRIPT</div>
+
+    <h1>Turn YouTube videos<br>into <span>readable PDFs.</span></h1>
+
+    <p>
+      Paste one or more YouTube links and get clean transcript PDFs in seconds.
+    </p>
   </header>
 
   <main>
-    <section>
-      <h2>Download transcripts</h2>
+    <section class="download-card">
+
+      <div class="card-heading">
+        <h2>Add your videos</h2>
+        <p>Paste one URL per line, or separate multiple URLs with commas.</p>
+      </div>
 
       <textarea
         id="urls"
-        placeholder="Paste YouTube URLs, one per line"
-        rows="10"
-        cols="50"
+        placeholder="https://www.youtube.com/watch?v=...
+https://www.youtube.com/watch?v=...
+https://www.youtube.com/watch?v=..."
+        rows="9"
       ></textarea>
 
-      <button id="download">Download Transcripts</button>
+      <button id="download">
+        Get PDFs
+        <span>→</span>
+      </button>
+
+      <p class="privacy-note">
+        No account required · No videos are downloaded
+      </p>
+
     </section>
   </main>
 
