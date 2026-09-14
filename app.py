@@ -1,15 +1,14 @@
 from flask import Flask, request, jsonify, send_file
 
-import requests
-import re
 import io
 import os
+import re
 import uuid
-import yt_dlp
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from xml.sax.saxutils import escape
+
+import requests
 
 import reportlab.rl_config
 reportlab.rl_config.use_harfbuzz = True
@@ -28,13 +27,16 @@ from reportlab.platypus import (
     TableStyle
 )
 
+
 app = Flask(__name__)
+
 
 # --------------------------------------------------
 # PDF STORAGE
 # --------------------------------------------------
 
 PDF_STORE = {}
+
 
 # --------------------------------------------------
 # FONT
@@ -49,6 +51,7 @@ FONT_PATH = os.path.join(
 pdfmetrics.registerFont(
     TTFont("NotoDevanagari", FONT_PATH)
 )
+
 
 # --------------------------------------------------
 # MIXED ENGLISH + HINDI TEXT
@@ -94,13 +97,15 @@ def mixed_font_markup(text):
 
     return "".join(parts)
 
+
 # --------------------------------------------------
 # HOME
 # --------------------------------------------------
 
 @app.route("/")
 def home():
-    return open("index.html").read()
+    return open("index.html", encoding="utf-8").read()
+
 
 # --------------------------------------------------
 # PAGE NUMBER / FOOTER
@@ -140,12 +145,12 @@ def add_page_number(canvas, document, title):
 
     canvas.restoreState()
 
+
 # --------------------------------------------------
 # CREATE PDF
 # --------------------------------------------------
 
 def create_pdf(title, url, transcript):
-
     pdf_buffer = io.BytesIO()
 
     document = SimpleDocTemplate(
@@ -298,7 +303,6 @@ def create_pdf(title, url, transcript):
     )
 
     for line in transcript:
-
         text = line.get("text", "").strip()
 
         if text:
@@ -321,53 +325,15 @@ def create_pdf(title, url, transcript):
 
     return pdf_buffer.read()
 
-# --------------------------------------------------
-# PLAYLIST
-# --------------------------------------------------
-
-def extract_playlist_urls(playlist_url):
-
-    options = {
-        "quiet": True,
-        "extract_flat": True,
-        "skip_download": True
-    }
-
-    with yt_dlp.YoutubeDL(options) as ydl:
-
-        info = ydl.extract_info(
-            playlist_url,
-            download=False
-        )
-
-    entries = info.get("entries", [])
-
-    video_urls = []
-
-    for entry in entries:
-
-        if not entry:
-            continue
-
-        video_id = entry.get("id")
-
-        if video_id:
-            video_urls.append(
-                f"https://www.youtube.com/watch?v={video_id}"
-            )
-
-    return video_urls
 
 # --------------------------------------------------
 # PROCESS ONE VIDEO
 # --------------------------------------------------
 
 def process_video(index, url):
-
     print("URL:", url)
 
     try:
-
         response = requests.get(
             "https://api.freetranscriptapi.com/v1/transcript",
             params={"video_url": url},
@@ -376,62 +342,118 @@ def process_video(index, url):
 
         print("STATUS:", response.status_code)
 
-        if response.status_code != 200:
+        # Rate limit
+        if response.status_code == 429:
+            retry_after = response.headers.get(
+                "Retry-After",
+                "unknown"
+            )
+
+            print("RATE LIMITED")
+            print("Retry-After:", retry_after, "seconds")
 
             return {
-                "success": False,
                 "index": index,
                 "url": url,
+                "success": False,
+                "reason": (
+                    "Transcript service is temporarily rate-limited. "
+                    f"Please try again later. "
+                    f"Retry after {retry_after} seconds."
+                )
+            }
+
+        # Other API failure
+        if response.status_code != 200:
+            print(
+                "TRANSCRIPT FAILED:",
+                response.status_code
+            )
+
+            return {
+                "index": index,
+                "url": url,
+                "success": False,
                 "reason": "Transcript unavailable"
             }
 
         data = response.json()
 
-        title = re.sub(
+        title = data.get(
+            "title",
+            f"Transcript {index}"
+        )
+
+        transcript = data.get(
+            "transcript",
+            ""
+        )
+
+        if not transcript:
+            return {
+                "index": index,
+                "url": url,
+                "success": False,
+                "reason": "Transcript was empty"
+            }
+
+        safe_title = re.sub(
             r'[\\/*?:"<>|]',
             "",
-            data.get("title", "")
+            title
         ).strip()
 
-        if not title:
-            title = "transcript"
+        if not safe_title:
+            safe_title = f"Transcript {index}"
 
-        pdf_filename = f"{index}_{title}.pdf"
-
-        pdf_data = create_pdf(
-            title,
+        pdf_bytes = create_pdf(
+            safe_title,
             url,
-            data.get("transcript", [])
+            transcript
         )
 
         pdf_id = str(uuid.uuid4())
 
         PDF_STORE[pdf_id] = {
-            "data": pdf_data,
-            "filename": pdf_filename
+            "data": pdf_bytes,
+            "filename": f"{safe_title}.pdf"
         }
 
-        print("SUCCESS:", url)
+        print("SUCCESS:", safe_title)
 
         return {
-            "success": True,
             "index": index,
-            "title": title,
-            "filename": pdf_filename,
-            "id": pdf_id
+            "url": url,
+            "success": True,
+            "title": safe_title,
+            "pdf_id": pdf_id
+        }
+
+    except requests.exceptions.Timeout:
+        print("TIMEOUT:", url)
+
+        return {
+            "index": index,
+            "url": url,
+            "success": False,
+            "reason": "Request timed out"
         }
 
     except Exception as e:
-
-        print("ERROR:", url)
-        print(e)
+        print(
+            "ERROR:",
+            url,
+            "|",
+            str(e)
+        )
 
         return {
-            "success": False,
             "index": index,
             "url": url,
-            "reason": "Something went wrong while processing this URL"
+            "success": False,
+            "reason": "Unexpected error"
         }
+
 
 # --------------------------------------------------
 # PDF DOWNLOAD
@@ -439,7 +461,6 @@ def process_video(index, url):
 
 @app.route("/pdf/<pdf_id>")
 def download_pdf(pdf_id):
-
     pdf = PDF_STORE.get(pdf_id)
 
     if not pdf:
@@ -454,13 +475,13 @@ def download_pdf(pdf_id):
         download_name=pdf["filename"]
     )
 
+
 # --------------------------------------------------
 # DOWNLOAD / PROCESS
 # --------------------------------------------------
 
 @app.route("/download", methods=["POST"])
 def download():
-
     raw_urls = request.json.get("urls", "")
 
     input_urls = re.split(
@@ -468,39 +489,25 @@ def download():
         raw_urls
     )
 
-    urls = []
+    urls = [
+        url.strip()
+        for url in input_urls
+        if url.strip()
+    ]
 
-    for url in input_urls:
-
-        url = url.strip()
-
-        if not url:
-            continue
-
-        if "list=" in url:
-
-            try:
-
-                playlist_urls = extract_playlist_urls(url)
-
-                print(
-                    f"PLAYLIST: found {len(playlist_urls)} videos"
-                )
-
-                urls.extend(playlist_urls)
-
-            except Exception as e:
-
-                print("PLAYLIST ERROR:", e)
-
-        else:
-
-            urls.append(url)
+    if not urls:
+        return jsonify({
+            "error": "Please enter at least one YouTube URL."
+        }), 400
 
     results = []
     failures = []
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # --------------------------------------------------
+    # CONTROLLED CONCURRENCY
+    # --------------------------------------------------
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
 
         futures = [
             executor.submit(
@@ -515,7 +522,6 @@ def download():
         ]
 
         for future in as_completed(futures):
-
             result = future.result()
 
             if result["success"]:
@@ -523,6 +529,7 @@ def download():
             else:
                 failures.append(result)
 
+    # Keep original input order
     results.sort(
         key=lambda item: item["index"]
     )
@@ -531,18 +538,16 @@ def download():
         key=lambda item: item["index"]
     )
 
+    # Remove internal fields
     for result in results:
-
         result.pop("success", None)
         result.pop("index", None)
 
     for failure in failures:
-
         failure.pop("success", None)
         failure.pop("index", None)
 
     if not results:
-
         return jsonify({
             "error": "No PDFs could be created.",
             "failures": failures
@@ -552,6 +557,7 @@ def download():
         "results": results,
         "failures": failures
     })
+
 
 # --------------------------------------------------
 # RUN

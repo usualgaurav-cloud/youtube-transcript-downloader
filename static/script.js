@@ -69,7 +69,7 @@ button.addEventListener("click", async () => {
             downloadButton.textContent = "Download PDF";
 
             downloadButton.addEventListener("click", () => {
-                window.location.href = `/pdf/${result.id}`;
+                window.location.href = `/pdf/${result.pdf_id}`;
             });
 
             resultCard.appendChild(info);
