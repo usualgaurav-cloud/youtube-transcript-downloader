@@ -69,26 +69,7 @@ button.addEventListener("click", async () => {
             downloadButton.textContent = "Download PDF";
 
             downloadButton.addEventListener("click", () => {
-                const pdfData = atob(result.pdf);
-                const bytes = new Uint8Array(pdfData.length);
-
-                for (let i = 0; i < pdfData.length; i++) {
-                    bytes[i] = pdfData.charCodeAt(i);
-                }
-
-                const blob = new Blob([bytes], {
-                    type: "application/pdf"
-                });
-
-                const link = document.createElement("a");
-                link.href = URL.createObjectURL(blob);
-                link.download = result.filename;
-
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-
-                URL.revokeObjectURL(link.href);
+                window.location.href = `/pdf/${result.id}`;
             });
 
             resultCard.appendChild(info);
@@ -105,6 +86,7 @@ button.addEventListener("click", async () => {
 
             data.failures.forEach((failure) => {
                 const failureText = document.createElement("p");
+
                 failureText.textContent =
                     `${failure.url} — ${failure.reason}`;
 

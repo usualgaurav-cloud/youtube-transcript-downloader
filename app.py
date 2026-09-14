@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 
 import requests
 import re
 import io
-import base64
 import os
+import uuid
 import yt_dlp
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +30,11 @@ from reportlab.platypus import (
 
 app = Flask(__name__)
 
+# --------------------------------------------------
+# PDF STORAGE
+# --------------------------------------------------
+
+PDF_STORE = {}
 
 # --------------------------------------------------
 # FONT
@@ -45,17 +50,11 @@ pdfmetrics.registerFont(
     TTFont("NotoDevanagari", FONT_PATH)
 )
 
-
 # --------------------------------------------------
 # MIXED ENGLISH + HINDI TEXT
 # --------------------------------------------------
 
 def mixed_font_markup(text):
-    """
-    Use Helvetica normally.
-    Switch to Noto Devanagari only for Devanagari characters.
-    """
-
     parts = []
     current = ""
     current_is_devanagari = None
@@ -95,7 +94,6 @@ def mixed_font_markup(text):
 
     return "".join(parts)
 
-
 # --------------------------------------------------
 # HOME
 # --------------------------------------------------
@@ -103,7 +101,6 @@ def mixed_font_markup(text):
 @app.route("/")
 def home():
     return open("index.html").read()
-
 
 # --------------------------------------------------
 # PAGE NUMBER / FOOTER
@@ -126,7 +123,6 @@ def add_page_number(canvas, document, title):
         17 * mm
     )
 
-    # Footer stays Helvetica
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(HexColor("#777777"))
 
@@ -143,7 +139,6 @@ def add_page_number(canvas, document, title):
     )
 
     canvas.restoreState()
-
 
 # --------------------------------------------------
 # CREATE PDF
@@ -164,8 +159,6 @@ def create_pdf(title, url, transcript):
 
     styles = getSampleStyleSheet()
 
-    # Normal font is Helvetica.
-    # Hindi portions will be switched using <font>.
     title_style = ParagraphStyle(
         "VideoTitle",
         parent=styles["Title"],
@@ -222,7 +215,6 @@ def create_pdf(title, url, transcript):
 
     story = []
 
-    # Brand
     story.append(
         Paragraph(
             "YT TRANSCRIPT",
@@ -230,7 +222,6 @@ def create_pdf(title, url, transcript):
         )
     )
 
-    # Title supports English + Hindi
     story.append(
         Paragraph(
             mixed_font_markup(title),
@@ -238,7 +229,6 @@ def create_pdf(title, url, transcript):
         )
     )
 
-    # Metadata stays completely Helvetica
     safe_url = escape(url)
 
     metadata = [
@@ -300,7 +290,6 @@ def create_pdf(title, url, transcript):
 
     story.append(metadata_table)
 
-    # Transcript heading
     story.append(
         Paragraph(
             "TRANSCRIPT",
@@ -308,7 +297,6 @@ def create_pdf(title, url, transcript):
         )
     )
 
-    # Transcript supports mixed Hindi + English
     for line in transcript:
 
         text = line.get("text", "").strip()
@@ -332,7 +320,6 @@ def create_pdf(title, url, transcript):
     pdf_buffer.seek(0)
 
     return pdf_buffer.read()
-
 
 # --------------------------------------------------
 # PLAYLIST
@@ -370,7 +357,6 @@ def extract_playlist_urls(playlist_url):
             )
 
     return video_urls
-
 
 # --------------------------------------------------
 # PROCESS ONE VIDEO
@@ -418,9 +404,12 @@ def process_video(index, url):
             data.get("transcript", [])
         )
 
-        encoded_pdf = base64.b64encode(
-            pdf_data
-        ).decode("utf-8")
+        pdf_id = str(uuid.uuid4())
+
+        PDF_STORE[pdf_id] = {
+            "data": pdf_data,
+            "filename": pdf_filename
+        }
 
         print("SUCCESS:", url)
 
@@ -429,7 +418,7 @@ def process_video(index, url):
             "index": index,
             "title": title,
             "filename": pdf_filename,
-            "pdf": encoded_pdf
+            "id": pdf_id
         }
 
     except Exception as e:
@@ -444,9 +433,29 @@ def process_video(index, url):
             "reason": "Something went wrong while processing this URL"
         }
 
+# --------------------------------------------------
+# PDF DOWNLOAD
+# --------------------------------------------------
+
+@app.route("/pdf/<pdf_id>")
+def download_pdf(pdf_id):
+
+    pdf = PDF_STORE.get(pdf_id)
+
+    if not pdf:
+        return jsonify({
+            "error": "PDF no longer available."
+        }), 404
+
+    return send_file(
+        io.BytesIO(pdf["data"]),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=pdf["filename"]
+    )
 
 # --------------------------------------------------
-# DOWNLOAD
+# DOWNLOAD / PROCESS
 # --------------------------------------------------
 
 @app.route("/download", methods=["POST"])
@@ -543,7 +552,6 @@ def download():
         "results": results,
         "failures": failures
     })
-
 
 # --------------------------------------------------
 # RUN
